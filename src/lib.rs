@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+pub mod compiler;
+
 /// Command-line arguments for `verirust`.
 #[derive(Debug, Parser)]
 #[command(
@@ -26,11 +28,35 @@ pub struct Args {
     pub tests: PathBuf,
 }
 
-/// Errors that occur before verification starts.
+/// Errors that can occur while running the verifier.
 #[derive(Debug)]
 pub enum Error {
     /// A path given on the command line does not point to a file.
     MissingFile { flag: &'static str, path: PathBuf },
+
+    /// An I/O operation failed. `context` says which one.
+    Io {
+        context: &'static str,
+        source: std::io::Error,
+    },
+
+    /// rustc ran and rejected the source. `stderr` is its diagnostic output.
+    CompileFailed { stderr: String },
+}
+
+impl Error {
+    /// Process exit code for this error.
+    ///
+    /// 1 = compilation failed. In the final product this becomes a
+    ///     `REJECTED` verdict with exit code 1, matching grep's convention.
+    /// 2 = the verifier could not run at all (bad args, missing file,
+    ///     toolchain unavailable). Matches clap's convention.
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Error::CompileFailed { .. } => 1,
+            _ => 2,
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -39,11 +65,24 @@ impl fmt::Display for Error {
             Error::MissingFile { flag, path } => {
                 write!(f, "{flag} does not point to a file: {}", path.display())
             }
+            Error::Io { context, source } => {
+                write!(f, "{context}: {source}")
+            }
+            Error::CompileFailed { stderr } => {
+                write!(f, "compilation failed:\n{stderr}")
+            }
         }
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 /// Entry point shared by the CLI and, later, integration tests.
 pub fn run(args: Args) -> Result<(), Error> {
@@ -60,11 +99,10 @@ pub fn run(args: Args) -> Result<(), Error> {
         });
     }
 
-    // Compilation, execution, and verdict reporting arrive in later steps.
-    println!("verirust {}", env!("CARGO_PKG_VERSION"));
-    println!("  source: {}", args.source.display());
-    println!("  tests:  {}", args.tests.display());
-    println!("verification not yet implemented");
+    // Held for the duration of `run`. Dropping it deletes the temp directory.
+    // Execution and verdict reporting arrive in the next step.
+    let _compiled = compiler::compile(&args.source)?;
+    println!("compiled successfully");
 
     Ok(())
 }

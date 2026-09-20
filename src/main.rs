@@ -11,7 +11,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("verirust: {err}");
-            ExitCode::from(2)
+            ExitCode::from(err.exit_code())
         }
     }
 }
