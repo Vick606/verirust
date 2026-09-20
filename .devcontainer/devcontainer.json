@@ -1,0 +1,14 @@
+{
+  "name": "verirust",
+  "image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
+  "postCreateCommand": "rustc --version"
+
+  // Use 'mounts' to make the cargo cache persistent in a Docker Volume.
+  // "mounts": [
+  //   {
+  //     "source": "devcontainer-cargo-cache-${devcontainerId}",
+  //     "target": "/usr/local/cargo",
+  //     "type": "volume"
+  //   }
+  // ]
+}
