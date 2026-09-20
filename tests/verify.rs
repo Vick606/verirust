@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use verirust::{compiler, runner, verifier, Error, Verdict};
+use verirust::{Error, Verdict, compiler, runner, verifier};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

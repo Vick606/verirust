@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn accepts_matching_output() {
-        assert_eq!(verify(&out("hello\n", Some(0)), "hello\n"), Verdict::Accepted);
+        assert_eq!(
+            verify(&out("hello\n", Some(0)), "hello\n"),
+            Verdict::Accepted
+        );
     }
 
     #[test]

@@ -57,10 +57,7 @@ pub fn compile(source: &Path) -> Result<Compiled, Error> {
         });
     }
 
-    Ok(Compiled {
-        _dir: dir,
-        binary,
-    })
+    Ok(Compiled { _dir: dir, binary })
 }
 
 #[cfg(test)]
