@@ -11,6 +11,7 @@ use crate::Error;
 ///
 /// The temp directory holding the binary is kept alive by this value.
 /// Dropping it deletes the directory and the binary inside.
+#[derive(Debug)]
 pub struct Compiled {
     // Underscore prevents an "unused field" warning. The field exists
     // only so its Drop impl runs when `Compiled` drops.
@@ -60,4 +61,34 @@ pub fn compile(source: &Path) -> Result<Compiled, Error> {
         _dir: dir,
         binary,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_temp(content: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("input.rs");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn compiles_valid_source() {
+        let (_dir, path) = write_temp(r#"fn main() { println!("hi"); }"#);
+        let compiled = compile(&path).unwrap();
+        assert!(compiled.binary().exists());
+    }
+
+    #[test]
+    fn rejects_invalid_source() {
+        let (_dir, path) = write_temp("fn main() { this is not rust }");
+        match compile(&path) {
+            Err(crate::Error::CompileFailed { stderr }) => assert!(!stderr.is_empty()),
+            other => panic!("expected CompileFailed, got {other:?}"),
+        }
+    }
 }
