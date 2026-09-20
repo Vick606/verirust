@@ -6,10 +6,15 @@
 
 use std::fmt;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 
 pub mod compiler;
+pub mod runner;
+pub mod verifier;
+
+pub use verifier::Verdict;
 
 /// Command-line arguments for `verirust`.
 #[derive(Debug, Parser)]
@@ -23,12 +28,19 @@ pub struct Args {
     #[arg(long, value_name = "FILE")]
     pub source: PathBuf,
 
-    /// Path to the file containing test cases.
+    /// Path to the file containing expected output.
     #[arg(long, value_name = "FILE")]
     pub tests: PathBuf,
+
+    /// Timeout for the compiled binary, in seconds.
+    #[arg(long, value_name = "SECONDS", default_value_t = 5)]
+    pub timeout: u64,
 }
 
-/// Errors that can occur while running the verifier.
+/// Errors that occur before verification starts or that prevent it entirely.
+///
+/// A rejected submission is *not* an error — it is a successful
+/// verification with a negative result, represented by `Verdict::Rejected`.
 #[derive(Debug)]
 pub enum Error {
     /// A path given on the command line does not point to a file.
@@ -40,23 +52,11 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// rustc ran and rejected the source. `stderr` is its diagnostic output.
+    /// rustc ran and rejected the source, or could not be spawned.
     CompileFailed { stderr: String },
-}
 
-impl Error {
-    /// Process exit code for this error.
-    ///
-    /// 1 = compilation failed. In the final product this becomes a
-    ///     `REJECTED` verdict with exit code 1, matching grep's convention.
-    /// 2 = the verifier could not run at all (bad args, missing file,
-    ///     toolchain unavailable). Matches clap's convention.
-    pub fn exit_code(&self) -> u8 {
-        match self {
-            Error::CompileFailed { .. } => 1,
-            _ => 2,
-        }
-    }
+    /// The compiled binary exceeded the timeout.
+    Timeout { seconds: u64 },
 }
 
 impl fmt::Display for Error {
@@ -65,12 +65,9 @@ impl fmt::Display for Error {
             Error::MissingFile { flag, path } => {
                 write!(f, "{flag} does not point to a file: {}", path.display())
             }
-            Error::Io { context, source } => {
-                write!(f, "{context}: {source}")
-            }
-            Error::CompileFailed { stderr } => {
-                write!(f, "compilation failed:\n{stderr}")
-            }
+            Error::Io { context, source } => write!(f, "{context}: {source}"),
+            Error::CompileFailed { stderr } => write!(f, "compilation failed:\n{stderr}"),
+            Error::Timeout { seconds } => write!(f, "program exceeded {seconds}s timeout"),
         }
     }
 }
@@ -85,7 +82,11 @@ impl std::error::Error for Error {
 }
 
 /// Entry point shared by the CLI and, later, integration tests.
-pub fn run(args: Args) -> Result<(), Error> {
+///
+/// Returns `Ok(Verdict::Rejected { .. })` for compile failures, timeouts,
+/// non-zero exits, and output mismatches. Returns `Err` only when the
+/// verifier itself could not run.
+pub fn run(args: Args) -> Result<Verdict, Error> {
     if !args.source.is_file() {
         return Err(Error::MissingFile {
             flag: "--source",
@@ -99,10 +100,30 @@ pub fn run(args: Args) -> Result<(), Error> {
         });
     }
 
-    // Held for the duration of `run`. Dropping it deletes the temp directory.
-    // Execution and verdict reporting arrive in the next step.
-    let _compiled = compiler::compile(&args.source)?;
-    println!("compiled successfully");
+    let expected = std::fs::read_to_string(&args.tests).map_err(|e| Error::Io {
+        context: "reading tests file",
+        source: e,
+    })?;
 
-    Ok(())
+    let compiled = match compiler::compile(&args.source) {
+        Ok(c) => c,
+        Err(Error::CompileFailed { stderr }) => {
+            return Ok(Verdict::Rejected {
+                reason: format!("compilation failed:\n{stderr}"),
+            });
+        }
+        Err(e) => return Err(e),
+    };
+
+    let output = match runner::run(compiled.binary(), Duration::from_secs(args.timeout)) {
+        Ok(o) => o,
+        Err(Error::Timeout { seconds }) => {
+            return Ok(Verdict::Rejected {
+                reason: format!("program exceeded {seconds}s timeout"),
+            });
+        }
+        Err(e) => return Err(e),
+    };
+
+    Ok(verifier::verify(&output, &expected))
 }
